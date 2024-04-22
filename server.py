@@ -1,117 +1,101 @@
 import socket
+import os
+import json
+from threading import Thread
 
-class VideoServer:
-    def __init__(self, host, port):
-        # Initialize VideoServer with host and port
-        self.host = '0.0.0.0'  # Use '0.0.0.0' to listen on all available interfaces
-        self.port = port
-        self.video_list = []  # Initialize an empty list to store video names
+SERVER_HOST = "127.0.0.1"
+SERVER_PORT = 5000
+UPLOAD_FOLDER = "uploads"
 
-    def start_server(self):
-        # Create a socket, bind it to host and port, and start listening for incoming connections
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(5)  # Allow up to 5 queued connections
-        print("Server is listening...")
+class VideoManager:
+    def __init__(self):
+        self.video_dict = {}
 
-        while True:
-            # Accept incoming connection
-            client_socket, client_address = self.server_socket.accept()
-            print(f"Connection from {client_address}")
-            # Handle client requests
-            self.handle_client(client_socket)
+    def check_video_existence(self, video_name):
+        return video_name in self.video_dict
 
-    def handle_client(self, client_socket):
-        # Receive and handle client requests
-        while True:
-            # Receive request from client
-            request = client_socket.recv(1024).decode()
-            if not request:  # If no data is received, break the loop
-                break
-
-            # Parse request
-            request_parts = request.split("|")
-            operation = request_parts[0]
-
-            # Perform requested operation
-            if operation == "INPUT_VIDEO":
-                response = self.input_new_video(request_parts[1])
-            elif operation == "SELECT_VIDEO":
-                response = self.select_video_to_stream(request_parts[1])
-            elif operation == "PLAY_VIDEO":
-                response = self.play_video()
-            elif operation == "PAUSE_VIDEO":
-                response = self.pause_video()
-            elif operation == "FAST_FORWARD_VIDEO":
-                response = self.fast_forward_video()
-            elif operation == "REWIND_VIDEO":
-                response = self.rewind_video()
-            elif operation == "NAME_VIDEO":
-                old_name, new_name = request_parts[1], request_parts[2]
-                response = self.name_video(old_name, new_name)
-            elif operation == "DELETE_VIDEO":
-                response = self.delete_video(request_parts[1])
-            else:
-                response = "Invalid operation."
-
-            # Send response back to client
-            client_socket.send(response.encode())
-
-        # Close client socket after handling requests
-        client_socket.close()
-
-    def input_new_video(self, video_name):
-        # Add new video to the video list
-        self.video_list.append(video_name)
-        return f"Video '{video_name}' added successfully."
-
-    def select_video_to_stream(self, video_name):
-        # Check if requested video exists in the video list
-        if video_name in self.video_list:
-            return f"Streaming video '{video_name}'."
-        else:
-            return f"Video '{video_name}' not found."
-        
-    def play_video(self):
-        # Method to indicate playing a video
-        return "Playing video."
-
-    def pause_video(self):
-        # Method to indicate pausing a video
-        return "Pausing video."
-
-    def fast_forward_video(self):
-        # Method to indicate fast-forwarding a video
-        return "Fast-forwarding video."
-
-    def rewind_video(self):
-        # Method to indicate rewinding a video
-        return "Rewinding video."
-
-    def name_video(self, old_name, new_name):
-        # Method to rename a video
-        if old_name in self.video_list:
-            # If the old video name exists in the list, rename it to the new name
-            self.video_list.remove(old_name)
-            self.video_list.append(new_name)
-            return f"Video '{old_name}' renamed to '{new_name}'."
-        else:
-            # If the old video name is not found, return a message indicating so
-            return f"Video '{old_name}' not found."
+    def add_video(self, video_name, video_file_path):
+        self.video_dict[video_name] = {"file_path": video_file_path}
+        self.save_video_list()
 
     def delete_video(self, video_name):
-        # Method to delete a video
-        if video_name in self.video_list:
-            # If the video to be deleted is found in the list, remove it
-            self.video_list.remove(video_name)
-            return f"Video '{video_name}' deleted successfully."
-        else:
-            # If the video to be deleted is not found, return a message indicating so
-            return f"Video '{video_name}' not found."
+        if video_name in self.video_dict:
+            del self.video_dict[video_name]
+            self.save_video_list()
+            return True
+        return False
 
-if __name__ == "__main__":
-    # Create an instance of VideoServer and start the server
-    server = VideoServer(host='server_ip_here', port=5000)  # Replace 'server_ip_here' with actual server IP
-    server.start_server()
+    def save_video_list(self):
+        with open("video_list.json", "w") as f:
+            json.dump(self.video_dict, f)
 
+    def load_video_list(self):
+        if os.path.exists("video_list.json"):
+            with open("video_list.json", "r") as f:
+                self.video_dict = json.load(f)
 
+def handle_client(client_socket, client_address, video_manager):
+    print(f"[+] Accepted connection from {client_address}")
+
+    while True:
+        try:
+            command = client_socket.recv(1024).decode('utf-8')  # Explicitly decode using UTF-8
+            if not command:
+                break
+            command = command.strip().lower()
+
+            if command.startswith("input_video|"):
+                _, video_name = command.split("|")
+                video_file_path = os.path.join(UPLOAD_FOLDER, video_name)
+                with open(video_file_path, "wb") as video_file:
+                    while True:
+                        chunk = client_socket.recv(1024)
+                        if not chunk:
+                            break
+                        video_file.write(chunk)
+                video_manager.add_video(video_name, video_file_path)
+                client_socket.send("Video uploaded successfully!".encode())
+
+            elif command.startswith("select_video|"):
+                _, video_name = command.split("|")
+                if video_manager.check_video_existence(video_name):
+                    client_socket.send(f"Video '{video_name}' selected.".encode())
+                else:
+                    client_socket.send(f"Video '{video_name}' not found.".encode())
+            elif command == "play_video":
+                client_socket.send("Playing video...".encode())
+            elif command == "quit":
+                break
+            else:
+                client_socket.send("Invalid command.".encode())
+        except UnicodeDecodeError as e:
+            print(f"Error decoding client data: {e}")
+            client_socket.send("Error: Invalid data received.".encode())
+            break
+        except Exception as e:
+            print(f"Error handling client request: {e}")
+
+    print(f"[-] Connection from {client_address} closed.")
+    client_socket.close()
+
+def accept_connections(server_socket, video_manager):
+    print("[*] Waiting for incoming connections...")
+    while True:
+        client_socket, client_address = server_socket.accept()
+        client_thread = Thread(target=handle_client, args=(client_socket, client_address, video_manager))
+        client_thread.start()
+
+def start_server():
+    try:
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind((SERVER_HOST, SERVER_PORT))
+        server_socket.listen(5)
+        print(f"[*] Listening for connections on {SERVER_HOST}:{SERVER_PORT}...")
+        video_manager = VideoManager()
+        video_manager.load_video_list()
+        accept_connections(server_socket, video_manager)
+    except Exception as e:
+        print(f"Error starting server: {e}")
+
+# Start the server
+start_server()

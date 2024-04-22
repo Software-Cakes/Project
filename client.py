@@ -1,62 +1,71 @@
 import socket
-import random
-from threading import Thread
-from datetime import datetime
-from time import sleep
+import os
 
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5000
 
-socket = socket.socket()
-print(f"[*] Connecting to {SERVER_HOST}:{SERVER_PORT}...")
-socket.connect((SERVER_HOST, SERVER_PORT))
-print("[+] Connected.")
-
-def listen_for_messages():
+def upload_video(video_file_path, socket):
     try:
-        while True:
-            message = socket.recv(1024).decode()
-            print("\n" + message)
+        with open(video_file_path, "rb") as video_file:
+            chunk = video_file.read(1024)
+            while chunk:
+                socket.send(chunk)
+                chunk = video_file.read(1024)
+            print("Upload complete.")
     except Exception as e:
-        print(f"Error listening: {e}")
-
-t = Thread(target=listen_for_messages)
-t.daemon = True
-t.start()
+        print(f"Error uploading video: {e}")
+        socket.close()
 
 def print_usage():
     print("Usage:")
     print("\t/add -> add a video.")
     print("\t/select -> select a video.")
     print("\t/play -> play a video.")
+    print("\t/delete -> delete a video.")
     print("\t/quit -> exit the program.")
 
-print_usage()
+def main():
+    # Establish connection to the server
+    client_socket = socket.socket()
+    print(f"[*] Connecting to {SERVER_HOST}:{SERVER_PORT}...")
+    client_socket.connect((SERVER_HOST, SERVER_PORT))
+    print("[+] Connected.")
 
-while True:
-    data = input(f"Enter a command: ")
-    cmd = data.strip().lower()
+    print_usage()
 
-    if cmd == '/quit':
-        socket.send(cmd.encode())
-        break
+    while True:
+        data = input(f"Enter a command: ")
+        cmd = data.strip().lower()
 
-    if cmd == "/add":
-        video_file_path = input("Enter a video file path: ")
-        to_send = "INPUT_VIDEO|" + video_file_path
-        print("adding " + to_send + "...")
-        socket.send(to_send.encode())    
-    elif cmd == '/select':
-        video_file_path = input("Enter a video file path: ")
-        to_send = "SELECT_VIDEO|" + video_file_path
-        print("selecting " + to_send + "...")
-        socket.send(to_send.encode())    
+        if cmd == '/quit':
+            client_socket.send(cmd.encode())
+            break
 
-    elif cmd == '/play':
-        to_send = "PLAY_VIDEO"
-        print("playing...")
-        socket.send(to_send.encode())    
+        if cmd == "/add":
+            video_file_path = input("Enter the path to the video file: ")
+            if os.path.exists(video_file_path):
+                # Send command to the server to indicate video upload
+                client_socket.send(f"input_video|{video_file_path}".encode())
+                # Upload the video file to the server
+                upload_video(video_file_path, client_socket)
+            else:
+                print("File not found.")
 
-    sleep(0.5)
 
-socket.close()
+        elif cmd == '/select':
+            video_name = input("Enter the name of the video: ")
+            # Send command to the server to select the video
+            client_socket.send(f"/select_video|{video_name}".encode())
+
+        elif cmd == '/play':
+            # Send command to the server to play the selected video
+            client_socket.send("/play_video".encode())
+
+        elif cmd == '/delete':
+            video_name = input("Enter the name of the video to delete: ")
+            client_socket.send(f"/delete_video|{video_name}".encode())
+
+    client_socket.close()
+
+if __name__ == "__main__":
+    main()
