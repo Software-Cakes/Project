@@ -45,12 +45,11 @@ def main():
             video_file_path = input("Enter the path to the video file: ")
             if os.path.exists(video_file_path):
                 # Send command to the server to indicate video upload
-                client_socket.send(f"input_video|{video_file_path}".encode())
+                client_socket.send(f"{video_file_path}".encode())
                 # Upload the video file to the server
                 upload_video(video_file_path, client_socket)
             else:
                 print("File not found.")
-
 
         elif cmd == '/select':
             video_name = input("Enter the name of the video: ")
